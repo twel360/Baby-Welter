@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Baby Welter Reveal</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bagel+Fat+One&family=Nunito:wght@400;600;800&display=swap">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}
+/* Layout: one centered "game card" on a soft sage ground; neutral until the reveal so nothing hints early. Single light world by choice. */
+:root{
+  --ground:#e7ece6;
+  --card:#fbfcfa;
+  --ink:#2b3430;
+  --muted:#66726c;
+  --line:#cfd8d1;
+  --girl:#e8577e;
+  --boy:#3d7fd6;
+  --foil-a:#c9a24a;
+  --foil-b:#f3dc93;
+  --display:"Bagel Fat One", "Arial Rounded MT Bold", system-ui, sans-serif;
+  --body:"Nunito", "Segoe UI", system-ui, sans-serif;
+  color-scheme:light;
+}
+html,body{min-height:100%}
+body{
+  background:var(--ground);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.5;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));
+  padding-right:max(16px, env(safe-area-inset-right, 0px));
+  padding-block:28px 40px;
+}
+.card{
+  max-width:440px;margin:0 auto;background:var(--card);border-radius:28px;
+  padding:28px 22px 26px;box-shadow:0 1px 0 var(--line), 0 18px 40px -24px rgba(43,52,48,.35);
+  display:flex;flex-direction:column;gap:18px;text-align:center;
+}
+.eyebrow{font-weight:800;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+h1{font-family:var(--display);font-weight:400;font-size:clamp(40px,12vw,56px);line-height:1;margin:6px 0 0;text-wrap:balance}
+.lede{margin:0;color:var(--muted)}
+.legend{display:flex;justify-content:center;gap:18px;flex-wrap:wrap;font-weight:600;font-size:14px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend svg{width:22px;height:22px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;max-width:340px;margin:0 auto}
+.tile{position:relative;aspect-ratio:1;max-width:100%;border-radius:18px;background:#fff;border:2px solid var(--line);overflow:hidden;transition:border-color .3s, transform .3s}
+.tile .sym{position:absolute;inset:0;display:grid;place-items:center}
+.tile .sym svg{width:58%;height:58%}
+.tile canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:pointer;transition:opacity .35s}
+.tile.done canvas{opacity:0;pointer-events:none}
+.tile.win{border-color:var(--girl);transform:scale(1.04)}
+.status{min-height:24px;font-weight:600;color:var(--muted);margin:0}
+.reveal{display:flex;flex-direction:column;gap:6px;align-items:center}
+.reveal .big{font-family:var(--display);font-size:clamp(44px,13vw,64px);line-height:1;color:var(--girl);animation:pop .6s cubic-bezier(.2,1.6,.4,1) both}
+.reveal p{margin:0;font-weight:600}
+button{font:inherit;font-weight:800;border:0;border-radius:999px;padding:10px 20px;background:var(--ink);color:var(--card);cursor:pointer}
+button:focus-visible{outline:3px solid var(--foil-a);outline-offset:3px}
+.btn-quiet{background:transparent;color:var(--muted);border:2px solid var(--line)}
+.actions{display:flex;justify-content:center;gap:10px;flex-wrap:wrap}
+#confetti{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:20}
+@keyframes pop{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}
+@media (prefers-reduced-motion:reduce){.reveal .big{animation:none}.tile{transition:none}}
+</style>
+</head>
+<body>
+
+<canvas id="confetti" aria-hidden="true"></canvas>
+<main class="card">
+  <div>
+    <div class="eyebrow">Gender reveal</div>
+    <h1>Baby Welter</h1>
+  </div>
+  <p class="lede">Boy or girl? Scratch the gold tiles with your finger. The first to get three in a row wins.</p>
+  <div class="legend" aria-label="Legend">
+    <span><svg id="lg-g" viewBox="0 0 40 40" aria-hidden="true"></svg>Heart = girl</span>
+    <span><svg id="lg-b" viewBox="0 0 40 40" aria-hidden="true"></svg>Star = boy</span>
+  </div>
+  <div class="grid" id="grid" aria-label="Scratch-off grid"></div>
+  <p class="status" id="status" aria-live="polite">9 tiles left to scratch</p>
+  <div class="reveal" id="reveal" hidden>
+    <div class="big">It's a girl!</div>
+    <p>Baby Welter is on her way.</p>
+  </div>
+  <div class="actions">
+    <button class="btn-quiet" id="all" type="button">Reveal all tiles</button>
+    <button id="again" type="button" hidden>Play again</button>
+  </div>
+</main>
+
+<script>
+(function(){
+  const HEART='<path d="M20 34s-13-7.6-13-17A7.2 7.2 0 0 1 20 12a7.2 7.2 0 0 1 13 5c0 9.4-13 17-13 17z" fill="#e8577e"/>';
+  const STAR='<path d="M20 5l4.4 9.2 10 1.3-7.3 7 1.8 10L20 27.6 11.1 32.5l1.8-10-7.3-7 10-1.3z" fill="#3d7fd6"/>';
+  document.getElementById('lg-g').innerHTML=HEART;
+  document.getElementById('lg-b').innerHTML=STAR;
+
+  // Answer kept lightly obscured so it isn't sitting in plain text.
+  const WIN = atob('aA==') === 'h' ? 1 : 0; // 1 = hearts win
+  const LINES=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  let board=[], revealed=[], over=false;
+  const grid=document.getElementById('grid'), statusEl=document.getElementById('status');
+
+  function makeBoard(){
+    // 5 winning symbols, 4 others; winners make at least one line, others make none.
+    while(true){
+      const idx=[0,1,2,3,4,5,6,7,8].sort(()=>Math.random()-.5);
+      const b=Array(9).fill(1-WIN); idx.slice(0,5).forEach(i=>b[i]=WIN);
+      const has=v=>LINES.some(l=>l.every(i=>b[i]===v));
+      if(has(WIN)&&!has(1-WIN)) return b;
+    }
+  }
+
+  function paintFoil(cv){
+    const r=cv.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
+    cv.width=Math.max(1,r.width*dpr); cv.height=Math.max(1,r.height*dpr);
+    const c=cv.getContext('2d'); c.scale(dpr,dpr);
+    const g=c.createLinearGradient(0,0,r.width,r.height);
+    g.addColorStop(0,'#b8903c');g.addColorStop(.45,'#f3dc93');g.addColorStop(.55,'#e9c96c');g.addColorStop(1,'#c9a24a');
+    c.fillStyle=g;c.fillRect(0,0,r.width,r.height);
+    for(let i=0;i<70;i++){c.fillStyle='rgba(255,255,255,'+(Math.random()*.35)+')';c.fillRect(Math.random()*r.width,Math.random()*r.height,1.5,1.5);}
+    c.fillStyle='rgba(90,64,20,.55)';c.font='800 '+Math.round(r.width*.36)+'px Nunito, sans-serif';
+    c.textAlign='center';c.textBaseline='middle';c.fillText('?',r.width/2,r.height/2+2);
+    c.globalCompositeOperation='destination-out';
+    return {c,w:r.width,h:r.height};
+  }
+
+  function build(){
+    board=makeBoard(); revealed=Array(9).fill(false); over=false;
+    grid.innerHTML='';
+    document.getElementById('reveal').hidden=true;
+    document.getElementById('again').hidden=true;
+    document.getElementById('all').hidden=false;
+    board.forEach((v,i)=>{
+      const t=document.createElement('div'); t.className='tile';
+      t.innerHTML='<div class="sym"><svg viewBox="0 0 40 40" aria-hidden="true">'+(v===1?HEART:STAR)+'</svg></div><canvas aria-label="Scratch tile '+(i+1)+'"></canvas>';
+      grid.appendChild(t);
+    });
+    requestAnimationFrame(()=>{ grid.querySelectorAll('.tile').forEach((t,i)=>setupTile(t,i)); });
+    updateStatus();
+  }
+
+  function setupTile(tile,i){
+    const cv=tile.querySelector('canvas'); let f=paintFoil(cv), down=false, last=null, checks=0;
+    const pos=e=>{const r=cv.getBoundingClientRect();return {x:e.clientX-r.left,y:e.clientY-r.top};};
+    const scratch=p=>{
+      const c=f.c; c.lineCap='round'; c.lineJoin='round'; c.lineWidth=f.w*.28;
+      c.beginPath(); if(last){c.moveTo(last.x,last.y);c.lineTo(p.x,p.y);c.stroke();}
+      c.arc(p.x,p.y,f.w*.14,0,Math.PI*2); c.fill(); last=p;
+      if(++checks%6===0) measure();
+    };
+    const measure=()=>{
+      const d=f.c.getImageData(0,0,cv.width,cv.height).data; let clear=0,n=0;
+      for(let k=3;k<d.length;k+=64){n++; if(d[k]<40) clear++;}
+      if(clear/n>.5) finish(tile,i);
+    };
+    cv.addEventListener('pointerdown',e=>{if(over&&!tile.classList.contains('done'))return; down=true;last=null;cv.setPointerCapture(e.pointerId);scratch(pos(e));});
+    cv.addEventListener('pointermove',e=>{if(down)scratch(pos(e));});
+    const up=()=>{if(down){down=false;measure();}};
+    cv.addEventListener('pointerup',up); cv.addEventListener('pointercancel',up);
+    cv.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();finish(tile,i);}});
+    cv.tabIndex=0;
+  }
+
+  function finish(tile,i){
+    if(revealed[i]) return;
+    revealed[i]=true; tile.classList.add('done');
+    check(); updateStatus();
+  }
+
+  function check(){
+    if(over) return;
+    const line=LINES.find(l=>l.every(i=>revealed[i]&&board[i]===WIN));
+    if(line){
+      over=true;
+      const tiles=grid.querySelectorAll('.tile');
+      line.forEach(i=>tiles[i].classList.add('win'));
+      setTimeout(win, 350);
+    }
+  }
+
+  function win(){
+    statusEl.textContent='Three hearts in a row!';
+    document.getElementById('reveal').hidden=false;
+    document.getElementById('again').hidden=false;
+    document.getElementById('all').hidden=true;
+    confetti();
+  }
+
+  function updateStatus(){
+    if(over) return;
+    const left=revealed.filter(x=>!x).length;
+    statusEl.textContent = left===9 ? '9 tiles left to scratch' : left+' tile'+(left===1?'':'s')+' left. Keep going!';
+  }
+
+  document.getElementById('all').addEventListener('click',()=>{
+    const tiles=grid.querySelectorAll('.tile');
+    tiles.forEach((t,i)=>{revealed[i]=true;t.classList.add('done');});
+    check();
+  });
+  document.getElementById('again').addEventListener('click',build);
+
+  // Confetti
+  const cc=document.getElementById('confetti'), cx=cc.getContext('2d');
+  function confetti(){
+    if(reduce) return;
+    const dpr=window.devicePixelRatio||1; cc.width=innerWidth*dpr; cc.height=innerHeight*dpr; cx.setTransform(dpr,0,0,dpr,0,0);
+    const cols=['#e8577e','#f59ab4','#f3dc93','#c9a24a','#ffffff','#fcc8d6'];
+    const ps=Array.from({length:160},()=>({x:Math.random()*innerWidth,y:-20-Math.random()*innerHeight*.6,vx:(Math.random()-.5)*2.4,vy:2+Math.random()*3.5,r:Math.random()*6.28,vr:(Math.random()-.5)*.25,s:6+Math.random()*6,c:cols[Math.random()*cols.length|0]}));
+    const t0=performance.now();
+    (function frame(t){
+      cx.clearRect(0,0,innerWidth,innerHeight);
+      ps.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.r+=p.vr;cx.save();cx.translate(p.x,p.y);cx.rotate(p.r);cx.fillStyle=p.c;cx.fillRect(-p.s/2,-p.s/4,p.s,p.s/2);cx.restore();});
+      if(t-t0<4500) requestAnimationFrame(frame); else cx.clearRect(0,0,innerWidth,innerHeight);
+    })(t0);
+  }
+
+  build();
+})();
+</script>
+</body>
+</html>
