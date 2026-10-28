@@ -95,20 +95,54 @@ button:focus-visible{outline:3px solid var(--foil-a);outline-offset:3px}
 
   // Answer kept lightly obscured so it isn't sitting in plain text.
   const WIN = atob('aA==') === 'h' ? 1 : 0; // 1 = hearts win
+  const LOSE = 1-WIN;
   const LINES=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  let board=[], revealed=[], over=false;
+  let board=[], revealed=[], over=false, gen=0;
   const grid=document.getElementById('grid'), statusEl=document.getElementById('status');
 
-  function makeBoard(){
-    // 5 winning symbols, 4 others; winners make at least one line, others make none.
-    while(true){
-      const idx=[0,1,2,3,4,5,6,7,8].sort(()=>Math.random()-.5);
-      const b=Array(9).fill(1-WIN); idx.slice(0,5).forEach(i=>b[i]=WIN);
-      const has=v=>LINES.some(l=>l.every(i=>b[i]===v));
-      if(has(WIN)&&!has(1-WIN)) return b;
+  // Rigged dealing: a tile has no symbol until someone starts scratching it. Each symbol is
+  // picked to hold off the winning line for as long as possible (stars never get a line).
+  // Even a worst-case scratching order can't finish before tile 7; a typical one ends on
+  // tile 9, often on a tile where a star would have won instead.
+  const lineDone=(b,v)=>LINES.some(l=>l.every(i=>b[i]===v));
+  const place=(b,i,s)=>{const nb=b.slice(); nb[i]=s; return nb;};
+  const freeOf=b=>b.reduce((a,v,i)=>(v<0&&a.push(i),a),[]);
+  // Value of putting s on tile i: [guaranteed winning tile number, expected one], or null if not allowed.
+  function value(b,i,s){
+    const nb=place(b,i,s), free=freeOf(b).length, k=10-free;
+    if(lineDone(nb,LOSE)) return null;
+    if(lineDone(nb,WIN)) return [k, k+(lineDone(place(b,i,LOSE),LOSE)?.5:0)];
+    if(free===1) return null;
+    return [worst(nb), avg(nb)];
+  }
+  const memoW=new Map(), memoA=new Map();
+  // Worst-case scratching order: the latest tile number we can still promise the win on.
+  function worst(b){
+    const key=b.join('');
+    if(!memoW.has(key)) memoW.set(key, Math.min(...freeOf(b).map(i=>Math.max(-99,...[0,1].map(s=>(value(b,i,s)||[-99])[0])))));
+    return memoW.get(key);
+  }
+  // Random scratching order: the expected winning tile number, plus a bonus when it's a coin flip.
+  function avg(b){
+    const key=b.join('');
+    if(!memoA.has(key)){
+      const f=freeOf(b);
+      memoA.set(key, f.reduce((t,i)=>t+Math.max(-99,...[0,1].map(s=>(value(b,i,s)||[0,-99])[1])),0)/f.length);
     }
+    return memoA.get(key);
+  }
+  function pick(i){
+    const opts=[0,1].map(s=>({s,v:value(board,i,s),r:Math.random()})).filter(o=>o.v);
+    if(!opts.length) return WIN;
+    opts.sort((a,b)=>(b.v[0]-a.v[0])||(b.v[1]-a.v[1])||(b.r-a.r));
+    return opts[0].s;
+  }
+  function assign(tile,i){
+    if(board[i]>=0) return;
+    board[i]=pick(i);
+    tile.querySelector('.sym').innerHTML='<svg viewBox="0 0 40 40" aria-hidden="true">'+(board[i]===1?HEART:STAR)+'</svg>';
   }
 
   function paintFoil(cv){
@@ -126,14 +160,15 @@ button:focus-visible{outline:3px solid var(--foil-a);outline-offset:3px}
   }
 
   function build(){
-    board=makeBoard(); revealed=Array(9).fill(false); over=false;
+    board=Array(9).fill(-1); revealed=Array(9).fill(false); over=false; gen++;
     grid.innerHTML='';
     document.getElementById('reveal').hidden=true;
     document.getElementById('again').hidden=true;
     document.getElementById('all').hidden=false;
+    document.getElementById('all').disabled=false;
     board.forEach((v,i)=>{
       const t=document.createElement('div'); t.className='tile';
-      t.innerHTML='<div class="sym"><svg viewBox="0 0 40 40" aria-hidden="true">'+(v===1?HEART:STAR)+'</svg></div><canvas aria-label="Scratch tile '+(i+1)+'"></canvas>';
+      t.innerHTML='<div class="sym"></div><canvas aria-label="Scratch tile '+(i+1)+'"></canvas>';
       grid.appendChild(t);
     });
     requestAnimationFrame(()=>{ grid.querySelectorAll('.tile').forEach((t,i)=>setupTile(t,i)); });
@@ -154,7 +189,7 @@ button:focus-visible{outline:3px solid var(--foil-a);outline-offset:3px}
       for(let k=3;k<d.length;k+=64){n++; if(d[k]<40) clear++;}
       if(clear/n>.5) finish(tile,i);
     };
-    cv.addEventListener('pointerdown',e=>{if(over&&!tile.classList.contains('done'))return; down=true;last=null;cv.setPointerCapture(e.pointerId);scratch(pos(e));});
+    cv.addEventListener('pointerdown',e=>{if(over&&!tile.classList.contains('done'))return; assign(tile,i);down=true;last=null;cv.setPointerCapture(e.pointerId);scratch(pos(e));});
     cv.addEventListener('pointermove',e=>{if(down)scratch(pos(e));});
     const up=()=>{if(down){down=false;measure();}};
     cv.addEventListener('pointerup',up); cv.addEventListener('pointercancel',up);
@@ -164,6 +199,7 @@ button:focus-visible{outline:3px solid var(--foil-a);outline-offset:3px}
 
   function finish(tile,i){
     if(revealed[i]) return;
+    assign(tile,i);
     revealed[i]=true; tile.classList.add('done');
     check(); updateStatus();
   }
@@ -190,13 +226,18 @@ button:focus-visible{outline:3px solid var(--foil-a);outline-offset:3px}
   function updateStatus(){
     if(over) return;
     const left=revealed.filter(x=>!x).length;
-    statusEl.textContent = left===9 ? '9 tiles left to scratch' : left+' tile'+(left===1?'':'s')+' left. Keep going!';
+    if(left===9){statusEl.textContent='9 tiles left to scratch';return;}
+    if(left===1){statusEl.textContent='One tile left. This one decides it!';return;}
+    const n=v=>board.filter((x,i)=>revealed[i]&&x===v).length, h=n(1), s=n(0);
+    statusEl.textContent='Hearts '+h+', stars '+s+'. '+(h===s?'Dead even!':'Anyone’s game.')+' '+left+' tiles left.';
   }
 
-  document.getElementById('all').addEventListener('click',()=>{
-    const tiles=grid.querySelectorAll('.tile');
-    tiles.forEach((t,i)=>{revealed[i]=true;t.classList.add('done');});
-    check();
+  // Reveal the rest one at a time; tiles already peeked at go first so the decider is unseen.
+  document.getElementById('all').addEventListener('click',e=>{
+    e.currentTarget.disabled=true;
+    const tiles=grid.querySelectorAll('.tile'), g=gen;
+    const order=[0,1,2,3,4,5,6,7,8].filter(i=>!revealed[i]).sort(()=>Math.random()-.5).sort((a,b)=>(board[b]>=0)-(board[a]>=0));
+    order.forEach((i,k)=>setTimeout(()=>{if(g===gen)finish(tiles[i],i);}, k*(reduce?150:450)));
   });
   document.getElementById('again').addEventListener('click',build);
 
